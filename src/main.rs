@@ -8,8 +8,7 @@ use std::{
 fn main() {
     println!("Hello Tiny Melody Server!");
 
-    let music_path = PathBuf::from("/media/extension/Music/Standard");
-    let cover_path = "";
+    let music_path = PathBuf::from("D:/Music/Standard");
 
     search_main(&music_path);
 }
@@ -30,13 +29,34 @@ fn search_main(music_path: &PathBuf) {
 
     println!("Search Complete,{} Songs Found.", count);
 
+    println!("Start to Compress.");
+
+    remove_empty_values(&mut folder_structure);
+
     let folder_structure = serde_json::to_string_pretty(&folder_structure).unwrap();
 
     data_save(&song_path, &folder_structure);
 
+    println!("Data Saved,Search Complete.")
+
     // println!("{:?}",song_path);
     // println!("{:?}",music_path);
     // println!("{:?}",song_path);
+}
+
+
+fn remove_empty_values(json_obj: &mut Value) {
+    if let Some(obj) = json_obj.as_object_mut() {
+        let keys: Vec<String> = obj.keys().cloned().collect();
+        for key in keys {
+            if obj[&key].is_object() {
+                remove_empty_values(&mut obj[&key]);
+                if obj[&key].as_object().unwrap().is_empty() {
+                    obj.remove(&key);
+                }
+            }
+        }
+    }
 }
 
 fn folder_traveler(
@@ -98,7 +118,7 @@ fn folder_traveler(
 
 fn data_save(song_path: &Vec<String>, folder_structure: &String) {
     let song_list = "song.list";
-    let folder_list = "web/data/folder.json";
+    let folder_list = "folder.json";
 
     if let Ok(mut file) = File::create(song_list) {
         for path in song_path {
@@ -123,9 +143,8 @@ fn music_parse(path: &PathBuf, name: &str, tags: &mut Value, index: &u32) {
     match Tag::read_from_path(&path) {
         Ok(tag) => {
             // 读取标签成功
-            tags[name] = json!({
-                "index":index,
-                "title": tag.title().unwrap_or_else(|| name.remove_extension()),
+            tags[tag.title().unwrap_or_else(|| name.remove_extension())] = json!({
+                "index": index,
                 "artist": tag.artist(),
                 "album": tag.album().unwrap_or_else(|| path.get_folder_name().unwrap_or_default()),
                 "disc": tag.disc(),
@@ -137,9 +156,8 @@ fn music_parse(path: &PathBuf, name: &str, tags: &mut Value, index: &u32) {
             // 读取标签失败
             println!("Error reading MP3 tags: {}", error);
             // 继续执行其他逻辑
-            tags[name] = json!({
-                "index":index,
-                "title": name.remove_extension(),
+            tags[name.remove_extension()] = json!({
+                "index": index,
                 "artist": path.get_folder_name(),
                 "album": "",
                 "disc": "",
