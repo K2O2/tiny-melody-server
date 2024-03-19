@@ -14,9 +14,12 @@ fn main() {
 }
 
 fn search_main(music_path: &PathBuf) {
+
+    let mut tag_list = MusicTag::default();
     let mut count: u32 = 0;
+    let start: u32 = 0;
     let mut song_path: Vec<String> = Vec::new();
-    let mut folder_structure = json!({});
+    let mut folder_structure = Vec::new();
     let standard_path = music_path.clone();
 
     folder_traveler(
@@ -25,38 +28,28 @@ fn search_main(music_path: &PathBuf) {
         &mut count,
         &mut song_path,
         &mut folder_structure,
+        &mut tag_list,
+        start
     );
 
     println!("Search Complete,{} Songs Found.", count);
 
     println!("Start to Compress.");
 
-    remove_empty_values(&mut folder_structure);
+    let tag_list = serde_json::to_string_pretty(&json!({
+        "title":tag_list.title,
+        "artist":tag_list.artist,
+        "album":tag_list.album,
+        "year":tag_list.year,
+
+    })).unwrap();
 
     let folder_structure = serde_json::to_string_pretty(&folder_structure).unwrap();
 
-    data_save(&song_path, &folder_structure);
+    data_save(&song_path, &folder_structure,&tag_list);
 
     println!("Data Saved,Search Complete.")
 
-    // println!("{:?}",song_path);
-    // println!("{:?}",music_path);
-    // println!("{:?}",song_path);
-}
-
-
-fn remove_empty_values(json_obj: &mut Value) {
-    if let Some(obj) = json_obj.as_object_mut() {
-        let keys: Vec<String> = obj.keys().cloned().collect();
-        for key in keys {
-            if obj[&key].is_object() {
-                remove_empty_values(&mut obj[&key]);
-                if obj[&key].as_object().unwrap().is_empty() {
-                    obj.remove(&key);
-                }
-            }
-        }
-    }
 }
 
 fn folder_traveler(
@@ -64,40 +57,55 @@ fn folder_traveler(
     music_path: &PathBuf,
     count: &mut u32,
     song_path: &mut Vec<String>,
-    folder_structure: &mut Value,
+    folder_structure: &mut Vec<Value>,
+    tag_list: &mut MusicTag,
+    start: u32,
 ) {
     if let Ok(entries) = fs::read_dir(music_path) {
-        //start to loop
+        let mut children = Vec::new();
+        let mut current_index = start;
+
         for entry in entries {
             if let Ok(entry) = entry {
                 let entry_path = entry.path();
-                //this name is contend with ext
                 let entry_name = entry_path
                     .file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or("");
-                //try to recognize thefolder and process
+
                 if entry_path.is_dir() {
-                    //create json
-                    let mut nested_json = json!({});
+                    let mut sub_count = 0;
+                    let mut sub_song_path = Vec::new();
+                    let mut sub_folder_structure = Vec::new();
+
                     folder_traveler(
                         standard_path,
                         &entry_path,
-                        count,
-                        song_path,
-                        &mut nested_json,
+                        &mut sub_count,
+                        &mut sub_song_path,
+                        &mut sub_folder_structure,
+                        tag_list,
+                        current_index,
                     );
-                    folder_structure[entry_name] = nested_json;
-                    //save to json
+
+                    if sub_count > 0 {
+                        let folder_entry = json!({
+                            "label": entry_name,
+                            "count": sub_count,
+                            "start": current_index,
+                            "children": sub_folder_structure,
+                        });
+
+                        children.push(folder_entry);
+                    }
+
+                    *count += sub_count;
+                    song_path.append(&mut sub_song_path);
+                    current_index += sub_count;
                 } else if entry_path.is_file() {
                     if let Some(extension) = entry_path.extension() {
                         if extension == "mp3" {
-                            //count +1
                             *count += 1;
-
-                            //saving paths
-                            println!("{:?}", entry_path);
-                            // println!("{:?}",music_path);
                             song_path.push(
                                 entry_path
                                     .strip_prefix(standard_path)
@@ -105,20 +113,21 @@ fn folder_traveler(
                                     .to_string_lossy()
                                     .to_string(),
                             );
-                            //reading tags
-                            music_parse(&entry_path, entry_name, folder_structure, &count);
-                            //save to folder
+                            music_parse(&entry_path, entry_name, tag_list);
                         }
                     }
                 }
             }
         }
+
+        *folder_structure = children;
     }
 }
 
-fn data_save(song_path: &Vec<String>, folder_structure: &String) {
+fn data_save(song_path: &Vec<String>, folder_structure: &String, tag_list: &String) {
     let song_list = "song.list";
     let folder_list = "folder.json";
+    let tag = "tag.json";
 
     if let Ok(mut file) = File::create(song_list) {
         for path in song_path {
@@ -137,33 +146,46 @@ fn data_save(song_path: &Vec<String>, folder_structure: &String) {
     } else {
         eprintln!("Failed to create folder_structure file");
     }
+
+    if let Ok(mut file) = File::create(tag) {
+        if let Err(err) = write!(file, "{}", tag_list) {
+            eprintln!("Failed to write tag_list to file: {}", err);
+        }
+    } else {
+        eprintln!("Failed to create tag file");
+    }
 }
 
-fn music_parse(path: &PathBuf, name: &str, tags: &mut Value, index: &u32) {
+struct MusicTag{
+    title:Vec<String>,
+    artist:Vec<String>,
+    album:Vec<String>,
+    year:Vec<u32>,
+}
+
+fn music_parse(path: &PathBuf, name: &str, tags: &mut MusicTag) {
     match Tag::read_from_path(&path) {
         Ok(tag) => {
-            // 读取标签成功
-            tags[tag.title().unwrap_or_else(|| name.remove_extension())] = json!({
-                "index": index,
-                "artist": tag.artist(),
-                "album": tag.album().unwrap_or_else(|| path.get_folder_name().unwrap_or_default()),
-                "disc": tag.disc(),
-                "track": tag.track(),
-                "year": tag.year(),
-            });
+            let title = tag.title().unwrap_or_else(|| name);
+            let artist = tag.artist().unwrap_or_else(|| "anonymous");
+            let album = tag.album().unwrap_or_else(|| path.get_folder_name().unwrap_or_default());
+            let year = tag.year().unwrap_or(2077);
+
+            tags.title.push(title.to_string());
+            tags.artist.push(artist.to_string());
+            tags.album.push(album.to_string());
+            tags.year.push(year as u32);
         }
         Err(error) => {
-            // 读取标签失败
             println!("Error reading MP3 tags: {}", error);
-            // 继续执行其他逻辑
-            tags[name.remove_extension()] = json!({
-                "index": index,
-                "artist": path.get_folder_name(),
-                "album": "",
-                "disc": "",
-                "track": "",
-                "year": "",
-            });
+
+            let title = name.to_string();
+            let album = path.get_folder_name().unwrap_or_else(|| "unknown");
+
+            tags.title.push(title);
+            tags.artist.push("anonymous".to_string());
+            tags.album.push(album.to_string());
+            tags.year.push(2077);
         }
     }
 }
@@ -194,6 +216,17 @@ impl FolderName for PathBuf {
                 .and_then(|folder_name| folder_name.to_str())
         } else {
             None
+        }
+    }
+}
+
+impl Default for MusicTag {
+    fn default() -> Self {
+        Self {
+            title: Vec::new(),
+            artist: Vec::new(),
+            album: Vec::new(),
+            year: Vec::new(),
         }
     }
 }
