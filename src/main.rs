@@ -5,16 +5,41 @@ use std::{
     io::Write,
     path::PathBuf,
 };
-fn main() {
+use warp::Filter;
+
+#[tokio::main]
+async fn main() {
     println!("Hello Tiny Melody Server!");
 
-    let music_path = PathBuf::from("D:/Music/Standard");
+    let music_path = PathBuf::from("D:/Music/LOCAL");
 
     search_main(&music_path);
+    // 静态文件路由
+    let static_files = warp::path("web")
+        .and(warp::fs::dir("./web"))
+        .or(warp::path("assets").and(warp::fs::dir("./web/assets")));
+
+    // API 路由
+    let api = warp::path("api")
+        .and(warp::post())
+        .and(warp::body::json())
+        .map(|_data: serde_json::Value| {
+            // 处理请求逻辑
+            // ...
+            let respon = ("Response from API", _data);
+            // 返回响应数据
+            warp::reply::json(&serde_json::json!(respon))
+        });
+
+    // 将静态文件路由和 API 路由合并为一个完整的路由
+    let routes = static_files.or(api);
+
+    // 启动 Warp 服务器
+    println!("Server now is running in http://0.0.0.0:3000/web");
+    warp::serve(routes).run(([0, 0, 0, 0], 3000)).await;
 }
 
 fn search_main(music_path: &PathBuf) {
-
     let mut tag_list = MusicTag::default();
     let mut count: u32 = 0;
     let start: u32 = 0;
@@ -29,7 +54,7 @@ fn search_main(music_path: &PathBuf) {
         &mut song_path,
         &mut folder_structure,
         &mut tag_list,
-        start
+        start,
     );
 
     println!("Search Complete,{} Songs Found.", count);
@@ -42,14 +67,14 @@ fn search_main(music_path: &PathBuf) {
         "album":tag_list.album,
         "year":tag_list.year,
 
-    })).unwrap();
+    }))
+    .unwrap();
 
     let folder_structure = serde_json::to_string_pretty(&folder_structure).unwrap();
 
-    data_save(&song_path, &folder_structure,&tag_list);
+    data_save(&song_path, &folder_structure, &tag_list);
 
     println!("Data Saved,Search Complete.")
-
 }
 
 fn folder_traveler(
@@ -156,11 +181,11 @@ fn data_save(song_path: &Vec<String>, folder_structure: &String, tag_list: &Stri
     }
 }
 
-struct MusicTag{
-    title:Vec<String>,
-    artist:Vec<String>,
-    album:Vec<String>,
-    year:Vec<u32>,
+struct MusicTag {
+    title: Vec<String>,
+    artist: Vec<String>,
+    album: Vec<String>,
+    year: Vec<u32>,
 }
 
 fn music_parse(path: &PathBuf, name: &str, tags: &mut MusicTag) {
@@ -168,7 +193,9 @@ fn music_parse(path: &PathBuf, name: &str, tags: &mut MusicTag) {
         Ok(tag) => {
             let title = tag.title().unwrap_or_else(|| name);
             let artist = tag.artist().unwrap_or_else(|| "anonymous");
-            let album = tag.album().unwrap_or_else(|| path.get_folder_name().unwrap_or_default());
+            let album = tag
+                .album()
+                .unwrap_or_else(|| path.get_folder_name().unwrap_or_default());
             let year = tag.year().unwrap_or(2077);
 
             tags.title.push(title.to_string());
