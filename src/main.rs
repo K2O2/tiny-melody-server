@@ -1,13 +1,22 @@
-use std::env;
 use id3::{Tag, TagLike};
+use rocket::fs::NamedFile;
+use rocket::{
+    figment::{
+        providers::{Format, Toml},
+        Figment,
+    },
+    fs::FileServer,
+    get, routes, Config, State,
+};
 use serde_json::{json, Value};
+use std::env;
+use std::io::Read;
 use std::{
     fs::{self, File},
     io::Write,
     path::PathBuf,
 };
-use rocket::{fs::FileServer, get, routes, State};
-use rocket::fs::NamedFile;
+use tokio::signal::ctrl_c;
 
 const WEB_DIR: &str = "web/";
 
@@ -23,13 +32,21 @@ async fn music(index: usize, state: &State<MusicState>) -> Option<NamedFile> {
 }
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    
     env::set_var("RUST_SERVER_LOG", "info");
     pretty_env_logger::init_custom_env("RUST_SERVER_LOG");
 
     println!("Hello Tiny Melody Server!");
 
-    let music_path = PathBuf::from("D:/Music/Standard");
+    let current_dir = env::current_dir()?;
+    let config_file_path = current_dir.join("server.toml");
+    let figment = Figment::new().merge(Toml::file(config_file_path).nested());
+
+    let server_config = Figment::from(rocket::Config::default()).merge(figment);
+
+    let server_config = Config::from(server_config);
+
+    let music_path = PathBuf::from(get_music_folder());
+    // let music_path = PathBuf::from("D:/Music/Standard");
     let music_list = search_main(&music_path);
 
     let music_state = MusicState {
@@ -37,17 +54,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         list: music_list,
     };
 
-    rocket::build()
+    let rocket = rocket::custom(server_config)
         .mount("/", FileServer::from(WEB_DIR))
         .manage(music_state)
-        .mount("/", routes![music])
-        .launch()
-        .await?;
+        .mount("/", routes![music]);
+
+    let rocket_handle = rocket::tokio::spawn(rocket.launch());
+
+    tokio::select! {
+        _ = ctrl_c() => {
+            println!("Received Ctrl+C, shutting down...");
+        }
+        _ = rocket_handle => {
+            println!("Rocket terminated.");
+        }
+    }
 
     Ok(())
 }
 
-fn get_music_path(index: usize, music_path: &PathBuf,music_list: &Vec<String>) -> Option<String> {
+fn get_music_folder() -> String {
+    let mut file = File::open("server.toml").expect("Failed to open server.toml");
+    let mut contents = String::new();
+    file.read_to_string(&mut contents).expect("Failed to read server.toml");
+
+    let parsed_toml: Value = Toml::from_str(&contents).expect("Failed to parse server.toml");
+
+    let music_path = parsed_toml["data"]["path"]
+        .as_str()
+        .expect("Invalid music_path value")
+        .to_string();
+
+    println!("Set Music Folder:{}",music_path);
+    music_path
+}
+
+fn get_music_path(index: usize, music_path: &PathBuf, music_list: &Vec<String>) -> Option<String> {
     let music_file = music_list.get(index)?;
     let music_file_path = music_path.join(music_file);
     music_file_path.to_str().map(String::from)
@@ -165,8 +207,8 @@ fn folder_traveler(
 
 fn data_save(song_path: &Vec<String>, folder_structure: &String, tag_list: &String) {
     let song_list = "song.list";
-    let folder_list = "folder.json";
-    let tag = "tag.json";
+    let folder_list = "./web/folder.json";
+    let tag = "./web/tag.json";
 
     if let Ok(mut file) = File::create(song_list) {
         for path in song_path {
@@ -218,7 +260,11 @@ fn music_parse(path: &PathBuf, name: &str, tags: &mut MusicTag) {
             tags.year.push(year as u32);
         }
         Err(error) => {
-            println!("Error reading MP3 tags: {},File: {}", error,path.to_str().unwrap());
+            println!(
+                "Error reading MP3 tags: {},File: {}",
+                error,
+                path.to_str().unwrap()
+            );
 
             let title = name.to_string();
             let album = path.get_folder_name().unwrap_or_else(|| "unknown");
