@@ -6,51 +6,52 @@ use std::{
     io::Write,
     path::PathBuf,
 };
-use rocket::{fs::FileServer, get, routes, State};
-use rocket::fs::NamedFile;
+use warp::Filter;
 
-const WEB_DIR: &str = "web/";
+const WEB_DIR:&str = "web/";
 
-struct MusicState {
-    path: PathBuf,
-    list: Vec<String>,
-}
-
-#[get("/music/<index>")]
-async fn music(index: usize, state: &State<MusicState>) -> Option<NamedFile> {
-    let file_path = get_music_path(index, &state.path, &state.list)?;
-    NamedFile::open(file_path).await.ok()
-}
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    
-    env::set_var("RUST_SERVER_LOG", "info");
+async fn main() ->Result<(),Box<dyn std::error::Error>>{
+    env::set_var("RUST_SERVER_LOG", "debug");
     pretty_env_logger::init_custom_env("RUST_SERVER_LOG");
 
     println!("Hello Tiny Melody Server!");
 
-    let music_path = PathBuf::from("D:/Music/Standard");
+
+
+    let music_path = PathBuf::from("D:/Music/LOCAL");
+
     let music_list = search_main(&music_path);
+    // 静态文件路由
+    let dir_static = warp::fs::dir(WEB_DIR);
 
-    let music_state = MusicState {
-        path: music_path,
-        list: music_list,
-    };
+    // let music = warp::get()
+    // .and(warp::path("index"))
+    // .and(warp::path::param::<usize>())
+    // .and(warp::path::end())
+    // .map(move |index: usize| {
+    //     let file_path = get_music_path(index, &music_path, music_list.clone());
+    //     warp::fs::file(file_path)
+    // });
 
-    rocket::build()
-        .mount("/", FileServer::from(WEB_DIR))
-        .manage(music_state)
-        .mount("/", routes![music])
-        .launch()
-        .await?;
+    let index = warp::get()
+    .and(warp::path::end())
+    .and(warp::fs::file(format!("{}/index.html",WEB_DIR)));
 
+    let static_route = dir_static.or(index);
+    // .or(music);
+
+    let routes = static_route;
+
+    warp::serve(routes).run(([127,0,0,1],3000)).await;
     Ok(())
 }
 
-fn get_music_path(index: usize, music_path: &PathBuf,music_list: &Vec<String>) -> Option<String> {
-    let music_file = music_list.get(index)?;
-    let music_file_path = music_path.join(music_file);
-    music_file_path.to_str().map(String::from)
+fn get_music_path(index: usize, music_path: &PathBuf, music_list: Vec<String>) -> String {
+    let music_file:PathBuf = PathBuf::from(music_list.get(index).unwrap_or_else(|| {
+        panic!("Index {} is out of bounds for the music_list.", index);
+    }));
+    music_path.join(music_file.file_name().unwrap()).to_str().unwrap().to_string()
 }
 
 fn search_main(music_path: &PathBuf) -> Vec<std::string::String> {
@@ -218,7 +219,7 @@ fn music_parse(path: &PathBuf, name: &str, tags: &mut MusicTag) {
             tags.year.push(year as u32);
         }
         Err(error) => {
-            println!("Error reading MP3 tags: {},File: {}", error,path.to_str().unwrap());
+            println!("Error reading MP3 tags: {}", error);
 
             let title = name.to_string();
             let album = path.get_folder_name().unwrap_or_else(|| "unknown");
