@@ -1,0 +1,6 @@
+[default]
+address = "127.0.0.1"
+port = 6000
+
+[data]
+path = "D:/音乐/Standard"
