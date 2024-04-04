@@ -1,0 +1,11 @@
+# 服务器的主机名或IP地址
+host = "localhost"
+
+# 服务器监听的端口号
+port = 8848
+
+# 数据存储的路径
+datapath = "D:/Music/standard"
+
+# 是否自动搜索
+autosearch = false
