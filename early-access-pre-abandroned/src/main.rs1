@@ -1,0 +1,140 @@
+use id3::{Tag, TagLike};
+use std::collections::HashMap;
+use std::fmt::Display;
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::{fmt, fs, io};
+
+fn main() {
+    println!("Hello,Tiny Melody Server!");
+
+    let folder_path = PathBuf::from("/media/h2o2/扩展/Music/LOCAL/pur");
+    let mut compressed_files: HashMap<PathBuf, Vec<String>> = HashMap::new();
+
+    if let Err(err) = search_files_recursive(&folder_path, &mut compressed_files) {
+        println!("Error: {:?}", err);
+    } else {
+        println!("Search Complete!")
+    }
+
+    if let Err(err) = write_path_to_file(&compressed_files, "path.txt") {
+        println!("Error: {:?}", err);
+    } else {
+        println!("FilePath successfully written to file.");
+    }
+
+    if let Err(err) = metadata_search(&mut compressed_files) {
+        println!("Error: {:?}", err);
+    } else {
+        println!("MetaData successfully written to file.");
+    }
+}
+
+#[derive(Debug)]
+struct MusicInfo {
+    artist: Option<String>,
+    title: Option<String>,
+    album: Option<String>,
+    disc: Option<u32>,
+    track: Option<u32>,
+    year: Option<i32>,
+}
+
+fn music_parse(path: &PathBuf) -> Result<MusicInfo, Box<dyn std::error::Error>> {
+    let tag = Tag::read_from_path(path)?;
+
+    let music_info = MusicInfo {
+        artist: tag.artist().map(|s| s.to_owned()),
+        title: tag.title().map(|s| s.to_owned()),
+        album: tag.album().map(|s| s.to_owned()),
+        disc: tag.disc(),
+        track: tag.track(),
+        year: tag.year(),
+    };
+    Ok(music_info)
+}
+
+//search file paths
+fn search_files_recursive(
+    folder_path: &Path,
+    compressed_files: &mut HashMap<PathBuf, Vec<String>>,
+) -> Result<(), io::Error> {
+    let entries = fs::read_dir(folder_path)?;
+
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+
+        if path.is_dir() {
+            search_files_recursive(&path, compressed_files)?;
+        } else {
+            if let Some(extension) = path.extension() {
+                if extension == "mp3" {
+                    let parent_path = path.parent().unwrap().to_path_buf();
+                    let file_name = path.file_name().unwrap().to_string_lossy().to_string();
+                    let file_names = compressed_files.entry(parent_path).or_insert_with(Vec::new);
+                    file_names.push(file_name);
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn write_path_to_file(
+    hashmap: &HashMap<PathBuf, Vec<String>>,
+    output_file: &str,
+) -> Result<(), io::Error> {
+    let web_directory = Path::new("web");
+    if !web_directory.exists() {
+        fs::create_dir(web_directory)?;
+    }
+
+    let file_path = web_directory.join(output_file);
+    let file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(file_path)?;
+
+    let mut writer = io::BufWriter::new(file);
+
+    for (path, file_names) in hashmap {
+        writeln!(writer, "Path: {:?}", path)?;
+        for file_name in file_names {
+            writeln!(writer, "File name: {}", file_name)?;
+        }
+        writeln!(writer)?;
+    }
+
+    writer.flush()?;
+    Ok(())
+}
+
+impl fmt::Display for MusicInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Music Info:")?;
+        if let Some(artist) = &self.artist {
+            writeln!(f, "Artist: {}", artist)?;
+        }
+        if let Some(title) = &self.title {
+            writeln!(f, "Title: {}", title)?;
+        }
+        if let Some(album) = &self.album {
+            writeln!(f, "Album: {}", album)?;
+        }
+        if let Some(disc) = &self.disc {
+            writeln!(f, "Disc: {}", disc)?;
+        }
+        if let Some(track) = &self.track {
+            writeln!(f, "Track: {}", track)?;
+        }
+        if let Some(year) = &self.year {
+            writeln!(f, "Year: {}", year)?;
+        }
+
+        Ok(())
+    }
+}
