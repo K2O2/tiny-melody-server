@@ -6,7 +6,7 @@ Tiny Melody Server is a simple and efficient music server that allows you to pla
 
 ## Why I write this?
 
-The reason for having a “tiny-melody-server” is because I own a GL-SFT1200 router and I need a lightweight music server that runs natively on OpenWrt without relying on Docker.
+The reason for having a “tiny-melody-server” is because I own a router with RK3568 and I need a lightweight music server that runs natively on OpenWrt without relying on Docker.
 
 ## WARNING
 
