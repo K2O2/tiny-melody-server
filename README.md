@@ -11,3 +11,7 @@ The reason for having a “tiny-melody-server” is because I own a router with 
 ## WARNING
 
 Tiny Melody Server is still in the early stages of development. Important features are missing.
+
+## ATTENTION!!!
+
+This Project now is read only.The New Project will replace this soon...
